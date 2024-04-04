@@ -1,0 +1,40 @@
+#!/usr/sbin/nft -f
+
+flush ruleset
+
+define guarded_ports = {25}
+
+table inet portknock {
+	set clients_ipv4 {
+		type ipv4_addr
+		flags timeout
+	}
+
+
+	set candidates_ipv4 {
+		type ipv4_addr . inet_service
+		flags timeout
+	}
+
+
+	chain input {
+		type filter hook input priority -10; policy accept;
+
+		iifname "lo" return
+		tcp dport {ssh} accept
+
+		tcp dport 957 add @candidates_ipv4 {ip  saddr . 521 timeout 2s} reject with tcp reset
+		tcp dport 521 ip  saddr . tcp dport @candidates_ipv4 add @candidates_ipv4 {ip  saddr . 720 timeout 2s} reject with tcp reset
+		tcp dport 720 ip  saddr . tcp dport @candidates_ipv4 add @candidates_ipv4 {ip  saddr . 123 timeout 2s} reject with tcp reset
+		tcp dport 123 ip  saddr . tcp dport @candidates_ipv4 add @clients_ipv4 {ip  saddr timeout 10s} log prefix "Successful portknock: " reject with tcp reset
+
+		tcp dport $guarded_ports ip  saddr @clients_ipv4 counter accept
+		tcp dport $guarded_ports ct state established,related counter accept
+
+		tcp dport $guarded_ports counter reject with tcp reset
+
+		ct state vmap { established : accept, related : accept, invalid : drop }
+		counter drop
+
+	}
+}
